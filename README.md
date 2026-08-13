@@ -175,7 +175,7 @@ table has six columns.
 | **Decision Tree** | Splits first on `Contract_Month-to-month`, confirming the single strongest signal in the data. Highest recall of any non-Bayes model (0.8201) and completely interpretable — 55 leaves at depth 6, a rule set a retention team could read. But it lands at exactly 0.7348 accuracy, identical to the majority-class baseline, while its MCC of 0.4667 is far from the baseline's 0.0. A crisp demonstration that accuracy alone would rate this model as worthless. Depth had to be capped: unpruned, it memorises the training split and generalises noticeably worse. |
 | **kNN** | Highest accuracy (0.7802) and highest precision (0.5897), and the weakest model where it counts. It flags only 446 customers and misses 44% of actual churners (recall 0.5632) — the most conservative model in the set. Its lowest-in-class AUC (0.8154) shows the ranking itself is weaker, not just the threshold. With 45 encoded dimensions the distance metric is diluted by dozens of sparse one-hot columns, the classic curse-of-dimensionality failure. Also the slowest at inference: 200 KB of stored training data that must be scanned per query. |
 | **Naive Bayes** | Best recall in the study (0.8373) and worst accuracy (0.6979) — it flags 847 of 1,761 customers, nearly half the book. The feature-independence assumption is badly violated here: `InternetService`, `OnlineSecurity`, `TechSupport` and `StreamingTV` are structurally correlated (no internet ⇒ no add-ons), so correlated evidence gets counted repeatedly and probabilities are pushed to extremes. Poorly calibrated, but the ranking survives (AUC 0.8112) and it trains in milliseconds. Usable as a cheap high-recall pre-filter, not as a final decision-maker. |
-| **Random Forest (Ensemble)** | Best F1 (0.6322) and best MCC (0.4828) — the most balanced model on the two metrics that account for both error types. Bagging 400 trees repairs the single tree's variance problem while keeping most of its recall: 0.7323 recall at 0.5561 precision, catching 342 of 467 churners. AUC 0.8437 is within 0.002 of Logistic Regression, so on pure ranking the two are effectively tied. Importances corroborate the linear model — `tenure` (0.127), `Contract_Month-to-month` (0.121) and `TotalCharges` (0.107) dominate. Costs 7.3 MB on disk against Logistic Regression's 3 KB. |
+| **Random Forest (Ensemble)** | Best F1 (0.6322) and best MCC (0.4828) — the most balanced model on the two metrics that account for both error types. Bagging 400 trees repairs the single tree's variance problem while keeping most of its recall: 0.7323 recall at 0.5561 precision, catching 342 of 467 churners. AUC 0.8437 trails Logistic Regression by just 0.0024, so on pure ranking the two are effectively tied. Importances corroborate the linear model — `tenure` (0.127), `Contract_Month-to-month` (0.121) and `TotalCharges` (0.107) dominate. Costs 7.3 MB on disk against Logistic Regression's 3 KB. |
 | **Overall winner for this dataset** | **Random Forest**, on MCC (0.4828) and F1 (0.6322) — the metrics that stay honest under a 73/27 class imbalance. The caveat is worth stating plainly: Logistic Regression *out-ranks* it on AUC (0.8460 vs 0.8437) at roughly 1/2000th the model size and with directly readable coefficients. Random Forest wins the assignment's scoring criteria; for a production retention system where a stakeholder has to be told *why* a customer was flagged, Logistic Regression would be the defensible choice. |
 
 ### A note on threshold choice
@@ -185,6 +185,19 @@ threshold-independent, which is why it is the fairest single-number comparison
 of the five algorithms — and why the deployed app exposes a **threshold slider**:
 dragging it re-scores precision, recall, F1 and MCC live while the ROC curve
 stays put, making the retention-cost trade-off visible rather than assumed.
+
+**0.50 is not the optimum.** Sweeping Random Forest across the full
+0.05–0.95 grid, both F1 and MCC peak at **0.47**, not 0.50:
+
+| Threshold | F1 | MCC |
+| :--- | ---: | ---: |
+| 0.50 (default) | 0.6322 | 0.4828 |
+| **0.47 (optimum)** | **0.6443** | **0.4997** |
+
+A 0.03 shift in the cut-off buys +0.0121 F1 and +0.0169 MCC for free — no
+retraining, no new features. The app's **Threshold analysis** tab computes this
+sweep live for whichever model is selected and offers one-click buttons to snap
+the slider to either optimum, so the point is demonstrable rather than asserted.
 
 ---
 
@@ -199,22 +212,39 @@ Deployed on Streamlit Community Cloud. Features:
 | Display of evaluation metrics | All six metrics as headline stat tiles, recomputed on the uploaded data |
 | Confusion matrix / classification report | Interactive heatmap **and** per-class precision/recall/F1 report, side by side |
 
+The interface is organised as four tabs — **Performance**, **Threshold
+analysis**, **Model comparison** and **Predictions** — under a fixed row of
+six metric tiles that always shows where the selected model ranks against the
+other four ("Best of 5", "2nd of 5 · −0.0062 vs best").
+
 Beyond the requirements:
 
-- **Decision-threshold slider** that re-scores every metric live, with a
-  "threshold economics" row (churners caught, false-alarm rate, flag rate)
+- **Threshold analysis tab** — a live precision/recall/F1 sweep across the whole
+  0.05–0.95 grid, the current cut-off marked on both the sweep and the ROC
+  curve, and one-click buttons to jump to the best-F1 or best-MCC threshold
+- **Threshold economics** — churners caught, false-alarm rate and flag rate,
   translating the cut-off into retention-team workload
 - **Confusion matrix shaded by row share**, so the 1,021 true negatives cannot
   wash out the three cells that carry the actual decision
-- **ROC curve** with hover read-out, plus an **all-models ROC overlay** and a
-  comparison bar chart re-rankable by any of the six metrics
+- **All-models ROC overlay** and a comparison bar chart re-rankable by any of
+  the six metrics
 - **Per-row predictions** led by churn probability, prediction and correctness,
   with a misclassified-rows-only filter and CSV download
 
-Charts are built with Altair rather than static Matplotlib images, so every
-mark carries a tooltip. The colour palette is validated for colour-vision
-deficiency (worst adjacent-pair separation ΔE 8.4 under protanopia, every
-series ≥ 3:1 contrast against the card surface).
+### Implementation notes
+
+Every model's predicted probabilities are computed **once per uploaded file** and
+cached on a content hash of the CSV. Scoring all five pipelines costs ~78 ms on
+the 1,761-row split; without caching that ran on every slider tick. Moving the
+threshold now only re-compares a cached probability vector, so interaction
+completes in ~155 ms end-to-end.
+
+Charts are built with Altair rather than static Matplotlib images, so every mark
+carries a tooltip. The colour palette is validated for colour-vision deficiency:
+worst adjacent-pair separation ΔE 8.4 under protanopia, every series ≥ 3:1
+contrast against the card surface. The three-colour subset used for the crossing
+sweep lines clears the stricter all-pairs gate (worst ΔE 9.4 deutan), because
+lines that cross cannot rely on adjacency.
 
 ---
 
