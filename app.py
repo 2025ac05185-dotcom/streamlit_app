@@ -70,6 +70,19 @@ METRIC_HELP = {
 
 METRICS = list(METRIC_HELP)
 
+# Column names and Vega-Lite field encodings reused across charts. Named once so
+# a rename cannot drift between the frame that supplies a column and the
+# encoding that reads it.
+COL_MODEL = "ML Model Name"
+FIELD_MODEL = "ML Model Name:N"
+FIELD_THRESHOLD = "Threshold:Q"
+FIELD_RATE = "Rate:Q"
+FIELD_VALUE = "Value:Q"
+FIELD_FPR = "FPR:Q"
+FIELD_TPR = "TPR:Q"
+LABEL_FPR = "False positive rate"
+LABEL_TPR = "True positive rate"
+
 # ------------------------------------------------------------------ palette --
 # Validated categorical ramp. Adjacent pairs (lines, bars): worst CVD dE 8.4,
 # normal-vision 19.3. The three-slot subset below also clears the stricter
@@ -124,14 +137,17 @@ def fingerprint(frame: pd.DataFrame) -> str:
 
 
 @st.cache_data(show_spinner="Scoring every model…")
-def score_all(data_key: str, _models: dict, _X: pd.DataFrame) -> dict:
+def score_all(data_key: str, _models: dict, _features: pd.DataFrame) -> dict:
     """Predicted churn probabilities per model — the only expensive step.
 
     Keyed on the data fingerprint alone, so changing the threshold or the
     selected model re-uses this instead of re-running five pipelines
     (measured at ~78 ms per rerun on the bundled 1,761-row split).
+    Leading underscores tell Streamlit not to hash these arguments.
     """
-    return {name: model.predict_proba(_X)[:, 1] for name, model in _models.items()}
+    return {
+        name: model.predict_proba(_features)[:, 1] for name, model in _models.items()
+    }
 
 
 def evaluate(y_true, y_pred, y_prob) -> dict:
@@ -174,7 +190,7 @@ def all_model_metrics(data_key: str, threshold: float, _probs: dict, _y) -> pd.D
         for name, p in _probs.items()
     }
     frame = pd.DataFrame(rows).T
-    frame.index.name = "ML Model Name"
+    frame.index.name = COL_MODEL
     return frame
 
 
@@ -323,7 +339,8 @@ def tile(
         shown = "—"
     else:
         shown = f"{value:.4f}"
-    chip = f'<span class="rank{" lead" if lead else ""}">{rank}</span>' if rank else ""
+    lead_class = " lead" if lead else ""
+    chip = f'<span class="rank{lead_class}">{rank}</span>' if rank else ""
     return (
         f'<div class="tile"><div class="top"><span class="label">{label}</span>{chip}</div>'
         f'<div class="value">{shown}</div>'
@@ -379,11 +396,11 @@ def rule_at(value: float, label: str) -> alt.Chart:
     frame = pd.DataFrame({"Threshold": [value], "tag": [label]})
     rule = alt.Chart(frame).mark_rule(
         color=INK_MUTED, strokeWidth=1, strokeDash=[3, 3]
-    ).encode(x=alt.X("Threshold:Q"))
+    ).encode(x=alt.X(FIELD_THRESHOLD))
     tag = alt.Chart(frame).mark_text(
         align="left", dx=6, dy=-6, baseline="top", fontSize=10,
         font="system-ui", color=INK_SECONDARY,
-    ).encode(x=alt.X("Threshold:Q"), y=alt.value(0), text="tag:N")
+    ).encode(x=alt.X(FIELD_THRESHOLD), y=alt.value(0), text="tag:N")
     return rule + tag
 
 
@@ -556,13 +573,13 @@ with tab_perf:
         )
         # A surface-coloured stroke is the 2px gap between cells, not a border.
         cells = base.mark_rect(stroke=SURFACE, strokeWidth=4, cornerRadius=6).encode(
-            color=alt.Color("Rate:Q", scale=alt.Scale(range=BLUE_RAMP[::-1], domain=[0, 1]),
+            color=alt.Color(FIELD_RATE, scale=alt.Scale(range=BLUE_RAMP[::-1], domain=[0, 1]),
                             legend=None),
             tooltip=[
                 alt.Tooltip("Actual:N", title="Actually"),
                 alt.Tooltip("Predicted:N", title="Predicted"),
                 alt.Tooltip("Count:Q", title="Customers", format=","),
-                alt.Tooltip("Rate:Q", title="Share of actual class", format=".1%"),
+                alt.Tooltip(FIELD_RATE, title="Share of actual class", format=".1%"),
             ],
         )
         counts = base.mark_text(fontSize=22, fontWeight=600, font="system-ui", dy=-9).encode(
@@ -571,7 +588,7 @@ with tab_perf:
             color=alt.condition(alt.datum.Rate > 0.5, alt.value("#ffffff"), alt.value("#0b0b0b")),
         )
         rates = base.mark_text(fontSize=11, font="system-ui", dy=13).encode(
-            text=alt.Text("Rate:Q", format=".1%"),
+            text=alt.Text(FIELD_RATE, format=".1%"),
             color=alt.condition(alt.datum.Rate > 0.5,
                                 alt.value("rgba(255,255,255,0.78)"),
                                 alt.value("rgba(11,11,11,0.72)")),
@@ -643,17 +660,17 @@ with tab_thresh:
             .encode(
                 # nice=False, or Vega pads the axis out to 0.00-1.00 and the
                 # lines float inside a range the sweep never covers.
-                x=alt.X("Threshold:Q", scale=alt.Scale(domain=[0.05, 0.95], nice=False),
+                x=alt.X(FIELD_THRESHOLD, scale=alt.Scale(domain=[0.05, 0.95], nice=False),
                         title="Decision threshold"),
-                y=alt.Y("Value:Q", scale=alt.Scale(domain=[0, 1]), title=None,
+                y=alt.Y(FIELD_VALUE, scale=alt.Scale(domain=[0, 1]), title=None,
                         axis=alt.Axis(format=".0%")),
                 color=alt.Color("Metric:N",
                                 scale=alt.Scale(domain=["Precision", "Recall", "F1"],
                                                 range=TRIPLE),
                                 legend=alt.Legend(title=None)),
                 tooltip=[alt.Tooltip("Metric:N"),
-                         alt.Tooltip("Threshold:Q", format=".2f"),
-                         alt.Tooltip("Value:Q", format=".4f")],
+                         alt.Tooltip(FIELD_THRESHOLD, format=".2f"),
+                         alt.Tooltip(FIELD_VALUE, format=".4f")],
             )
         )
         st.altair_chart(
@@ -673,14 +690,16 @@ with tab_thresh:
         step = max(1, len(fpr) // 400)
         roc_df = pd.DataFrame({"FPR": fpr[::step], "TPR": tpr[::step], "Series": selected})
         diag = pd.DataFrame({"FPR": [0.0, 1.0], "TPR": [0.0, 1.0], "Series": "Random"})
-        axis_kw = dict(scale=alt.Scale(domain=[0, 1]),
-                       axis=alt.Axis(format=".0%", tickCount=5))
+        axis_kw = {
+            "scale": alt.Scale(domain=[0, 1]),
+            "axis": alt.Axis(format=".0%", tickCount=5),
+        }
         curve = (
             alt.Chart(pd.concat([roc_df, diag], ignore_index=True))
             .mark_line(strokeWidth=2, strokeCap="round")
             .encode(
-                x=alt.X("FPR:Q", title="False positive rate", **axis_kw),
-                y=alt.Y("TPR:Q", title="True positive rate", **axis_kw),
+                x=alt.X(FIELD_FPR, title=LABEL_FPR, **axis_kw),
+                y=alt.Y(FIELD_TPR, title=LABEL_TPR, **axis_kw),
                 color=alt.Color("Series:N",
                                 scale=alt.Scale(domain=[selected, "Random"],
                                                 range=[BLUE, INK_MUTED]),
@@ -688,8 +707,8 @@ with tab_thresh:
                 strokeDash=alt.condition(alt.datum.Series == "Random",
                                          alt.value([4, 4]), alt.value([0])),
                 detail="Series:N",
-                tooltip=[alt.Tooltip("FPR:Q", format=".2%"),
-                         alt.Tooltip("TPR:Q", format=".2%")],
+                tooltip=[alt.Tooltip(FIELD_FPR, format=".2%"),
+                         alt.Tooltip(FIELD_TPR, format=".2%")],
             )
         )
         # Where the sidebar threshold actually puts you on that curve.
@@ -699,12 +718,12 @@ with tab_thresh:
         })
         point = alt.Chart(op).mark_point(
             size=150, filled=True, color=BLUE, stroke=SURFACE, strokeWidth=2
-        ).encode(x=alt.X("FPR:Q", **axis_kw), y=alt.Y("TPR:Q", **axis_kw),
-                 tooltip=[alt.Tooltip("FPR:Q", title="False positive rate", format=".2%"),
-                          alt.Tooltip("TPR:Q", title="True positive rate", format=".2%")])
+        ).encode(x=alt.X(FIELD_FPR, **axis_kw), y=alt.Y(FIELD_TPR, **axis_kw),
+                 tooltip=[alt.Tooltip(FIELD_FPR, title=LABEL_FPR, format=".2%"),
+                          alt.Tooltip(FIELD_TPR, title=LABEL_TPR, format=".2%")])
         op_label = alt.Chart(op).mark_text(
             align="left", dx=10, dy=4, fontSize=10, font="system-ui", color=INK_SECONDARY
-        ).encode(x=alt.X("FPR:Q", **axis_kw), y=alt.Y("TPR:Q", **axis_kw),
+        ).encode(x=alt.X(FIELD_FPR, **axis_kw), y=alt.Y(FIELD_TPR, **axis_kw),
                  text=alt.value(f"threshold {threshold:.2f}"))
         st.altair_chart(
             style(curve + point + op_label, height=330)
@@ -734,7 +753,7 @@ with tab_compare:
             .rename(columns={metric_choice: "Value"})
             .sort_values("Value", ascending=False)
         )
-        top = rank_df.iloc[0]["ML Model Name"]
+        top = rank_df.iloc[0][COL_MODEL]
         # Bars keep their zero baseline; only the headroom is trimmed, so the
         # five models are actually distinguishable instead of all reading ~half.
         hi, lo = float(rank_df["Value"].max()), float(rank_df["Value"].min())
@@ -745,17 +764,17 @@ with tab_compare:
             alt.Chart(rank_df)
             .mark_bar(cornerRadiusEnd=4, height=22)
             .encode(
-                x=alt.X("Value:Q", title=metric_choice, scale=alt.Scale(domain=domain)),
-                y=alt.Y("ML Model Name:N", sort="-x", title=None,
+                x=alt.X(FIELD_VALUE, title=metric_choice, scale=alt.Scale(domain=domain)),
+                y=alt.Y(FIELD_MODEL, sort="-x", title=None,
                         axis=alt.Axis(labelLimit=200, labelFontSize=12)),
-                color=alt.condition(alt.datum["ML Model Name"] == top,
+                color=alt.condition(alt.datum[COL_MODEL] == top,
                                     alt.value(BLUE), alt.value(RECEDE)),
-                tooltip=[alt.Tooltip("ML Model Name:N", title="Model"),
-                         alt.Tooltip("Value:Q", title=metric_choice, format=".4f")],
+                tooltip=[alt.Tooltip(FIELD_MODEL, title="Model"),
+                         alt.Tooltip(FIELD_VALUE, title=metric_choice, format=".4f")],
             )
         )
         labels = bars.mark_text(align="left", dx=8, fontSize=11, font="system-ui").encode(
-            text=alt.Text("Value:Q", format=".4f"), color=alt.value(INK_SECONDARY)
+            text=alt.Text(FIELD_VALUE, format=".4f"), color=alt.value(INK_SECONDARY)
         )
         st.altair_chart(
             style(bars + labels, height=260, legend=False)
@@ -779,10 +798,10 @@ with tab_compare:
                 alt.Chart(curve_df)
                 .mark_line(strokeWidth=2, strokeCap="round")
                 .encode(
-                    x=alt.X("FPR:Q", title="False positive rate",
+                    x=alt.X(FIELD_FPR, title=LABEL_FPR,
                             scale=alt.Scale(domain=[0, 1]),
                             axis=alt.Axis(format=".0%", tickCount=5)),
-                    y=alt.Y("TPR:Q", title="True positive rate",
+                    y=alt.Y(FIELD_TPR, title=LABEL_TPR,
                             scale=alt.Scale(domain=[0, 1]),
                             axis=alt.Axis(format=".0%", tickCount=5)),
                     color=alt.Color("Model (AUC):N",
@@ -790,8 +809,8 @@ with tab_compare:
                                         domain=[auc_label[n] for n in comparison.index],
                                         range=SERIES),
                                     legend=alt.Legend(title=None)),
-                    tooltip=[alt.Tooltip("Model:N"), alt.Tooltip("FPR:Q", format=".2%"),
-                             alt.Tooltip("TPR:Q", format=".2%")],
+                    tooltip=[alt.Tooltip("Model:N"), alt.Tooltip(FIELD_FPR, format=".2%"),
+                             alt.Tooltip(FIELD_TPR, format=".2%")],
                 )
             )
             # Streamlit fits plot + title + legend into `height`, so a five-row
@@ -815,7 +834,7 @@ with tab_compare:
     if trained:
         with st.expander("Reference metrics recorded during training"):
             ref = pd.DataFrame(trained).T.set_index("label").astype(float)
-            ref.index.name = "ML Model Name"
+            ref.index.name = COL_MODEL
             st.dataframe(ref.round(4), width="stretch")
 
 # ----------------------------------------------------------- tab: row-level --
