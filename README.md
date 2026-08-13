@@ -82,25 +82,26 @@ app accepts a **raw** CSV upload with no client-side encoding whatsoever.
 
 ## c. GitHub Repository Link
 
-> **https://github.com/<your-username>/telco-churn-ml**
->
-> _Replace with the actual repository URL before submitting._
+> **https://github.com/2025ac05185-dotcom/stream_app**
 
 ### Live Streamlit App
 
 > **https://<your-app-name>.streamlit.app**
 >
-> _Replace with the actual deployed URL before submitting._
+> _Replace with the deployed URL once the app is live on Streamlit Community
+> Cloud (New App → this repo → branch `main` → `app.py`)._
 
 ### Repository structure
 
 ```
-telco-churn-ml/
+stream_app/
 ├── app.py                  # Streamlit application
 ├── requirements.txt        # Pinned dependencies
 ├── README.md               # This file
 ├── test_data.csv           # Held-out test split (1,761 rows, raw format)
 ├── .gitignore
+├── .devcontainer/
+│   └── devcontainer.json
 ├── .streamlit/
 │   └── config.toml         # Dark theme + chart colour tokens
 ├── data/
@@ -120,8 +121,8 @@ telco-churn-ml/
 ### Reproducing the results
 
 ```bash
-git clone https://github.com/<your-username>/telco-churn-ml.git
-cd telco-churn-ml
+git clone https://github.com/2025ac05185-dotcom/stream_app.git
+cd stream_app
 pip install -r requirements.txt
 
 python model/train_models.py   # retrains, rewrites test_data.csv + metrics
