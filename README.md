@@ -82,7 +82,7 @@ app accepts a **raw** CSV upload with no client-side encoding whatsoever.
 
 ## c. GitHub Repository Link
 
-> **https://github.com/2025ac05185-dotcom/stream_app**
+> **https://github.com/2025ac05185-dotcom/streamlit_app**
 
 ### Live Streamlit App
 
@@ -94,7 +94,7 @@ app accepts a **raw** CSV upload with no client-side encoding whatsoever.
 ### Repository structure
 
 ```
-stream_app/
+streamlit_app/
 ├── app.py                  # Streamlit application
 ├── requirements.txt        # Pinned dependencies
 ├── README.md               # This file
@@ -121,8 +121,8 @@ stream_app/
 ### Reproducing the results
 
 ```bash
-git clone https://github.com/2025ac05185-dotcom/stream_app.git
-cd stream_app
+git clone https://github.com/2025ac05185-dotcom/streamlit_app.git
+cd streamlit_app
 pip install -r requirements.txt
 
 python model/train_models.py   # retrains, rewrites test_data.csv + metrics
