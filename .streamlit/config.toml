@@ -1,0 +1,52 @@
+[theme]
+# Dark-first design tokens. Palette values come from a validated categorical
+# ramp (adjacent CVD ΔE >= 8.4, normal-vision ΔE >= 19.3, all slots >= 3:1
+# against the #181817 card surface).
+base = "dark"
+
+backgroundColor = "#0d0d0d"           # page plane
+secondaryBackgroundColor = "#181817"  # cards, sidebar, chart surface
+textColor = "#f2f1ec"
+primaryColor = "#3987e5"
+linkColor = "#5598e7"
+
+borderColor = "#2c2c2a"
+dataframeBorderColor = "#2c2c2a"
+dataframeHeaderBackgroundColor = "#1f1f1e"
+codeBackgroundColor = "#141413"
+
+font = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+headingFont = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+codeFont = "ui-monospace, SFMono-Regular, Menlo, monospace"
+
+baseFontSize = 15
+baseRadius = "0.65rem"
+buttonRadius = "0.5rem"
+showWidgetBorder = true
+headingFontSizes = ["2.1rem", "1.5rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
+headingFontWeights = [650, 640, 620, 600, 600, 600]
+
+# Vega-Lite / Altair inherit these directly.
+chartCategoricalColors = [
+  "#3987e5",  # blue
+  "#d95926",  # orange
+  "#199e70",  # aqua
+  "#c98500",  # yellow
+  "#d55181",  # magenta
+]
+chartSequentialColors = [
+  "#0d366b", "#104281", "#184f95", "#1c5cab", "#256abf",
+  "#2a78d6", "#3987e5", "#5598e7", "#6da7ec", "#86b6ef",
+]
+
+[theme.sidebar]
+backgroundColor = "#131312"
+secondaryBackgroundColor = "#1f1f1e"
+borderColor = "#2c2c2a"
+baseRadius = "0.5rem"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
