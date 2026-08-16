@@ -1,29 +1,30 @@
-# Telco Customer Churn — Classification Model Comparison
+# Telco Customer Churn — Comparing Five Classification Models
 
 **BITS Pilani WILP · M.Tech (AIML) · Machine Learning · Assignment 2**
 
-Five classifiers trained on one shared preprocessing pipeline, scored on a
-common held-out split, and served through an interactive Streamlit dashboard.
+I trained five classifiers on the IBM Telco Customer Churn dataset, evaluated
+them on the same held-out test split, and deployed a Streamlit dashboard where
+you can upload a CSV and compare the models interactively.
 
 ---
 
 ## a. Problem Statement
 
-A telecommunications provider loses roughly a quarter of its subscriber base
-each billing cycle. Winning a replacement customer costs several times more
-than keeping an existing one, so the commercial value sits in **flagging
-at-risk customers early enough to intervene** — a retention call, a contract
-upgrade offer, a discount.
+A telecom company loses about a quarter of its customers. Getting a new customer
+costs a lot more than keeping an existing one, so if the company can identify
+which customers are likely to leave, it can try to keep them with a retention
+call or a better offer.
 
-Framed as supervised learning: given 19 attributes describing a customer's
-demographics, subscribed services, contract type and billing history, predict
-the binary label `Churn ∈ {Yes, No}`.
+As a machine learning problem this is binary classification: given 19 attributes
+about a customer (demographics, which services they subscribe to, their contract
+type and their billing history), predict whether `Churn` is Yes or No.
 
-The business asymmetry matters and shapes every modelling choice below. A
-**false negative** (a churner the model calls safe) costs a lost customer. A
-**false positive** (a loyal customer flagged) costs one unnecessary retention
-call. Those are not equally expensive, which is why accuracy is the *least*
-interesting number in the results table and MCC the most.
+The two kinds of mistakes are not equally costly, and this affected most of my
+choices later on. If the model says a customer is safe but they actually leave
+(false negative), the company loses that customer. If the model flags a loyal
+customer (false positive), the company wastes one retention call. The first
+mistake is much more expensive than the second. This is why I did not treat
+accuracy as the main metric and used MCC instead.
 
 ---
 
@@ -31,52 +32,53 @@ interesting number in the results table and MCC the most.
 
 | Property | Value |
 | --- | --- |
-| Source | IBM Sample Data Sets — Telco Customer Churn (public; mirrored on Kaggle) |
-| Instances | 7,043 customers (requirement: ≥ 500) |
-| Columns | 21 raw → 19 predictive features after dropping `customerID` and the label (requirement: ≥ 12) |
-| Encoded width | 45 columns after one-hot encoding |
+| Source | IBM Sample Data Sets — Telco Customer Churn (public, also on Kaggle) |
+| Instances | 7,043 customers (requirement was ≥ 500) |
+| Columns | 21 raw columns, 19 usable features after dropping `customerID` and the label (requirement was ≥ 12) |
+| After encoding | 45 columns |
 | Task | Binary classification |
-| Class balance | 5,174 retained (73.46%) / 1,869 churned (26.54%) |
-| Split | 75 / 25 stratified — 5,282 train, 1,761 test, `random_state=42` |
+| Class balance | 5,174 stayed (73.46%) and 1,869 churned (26.54%) |
+| Split | 75/25 stratified, so 5,282 for training and 1,761 for testing, `random_state=42` |
 
-### Feature groups
+### Features
 
-- **Demographic (4)** — `gender`, `SeniorCitizen`, `Partner`, `Dependents`
-- **Services (9)** — `PhoneService`, `MultipleLines`, `InternetService`,
+- **Demographic (4):** `gender`, `SeniorCitizen`, `Partner`, `Dependents`
+- **Services (9):** `PhoneService`, `MultipleLines`, `InternetService`,
   `OnlineSecurity`, `OnlineBackup`, `DeviceProtection`, `TechSupport`,
   `StreamingTV`, `StreamingMovies`
-- **Account (6)** — `tenure`, `Contract`, `PaperlessBilling`, `PaymentMethod`,
+- **Account (6):** `tenure`, `Contract`, `PaperlessBilling`, `PaymentMethod`,
   `MonthlyCharges`, `TotalCharges`
 
-### Data quality issues found and handled
+### Data problems I had to fix
 
-1. **`TotalCharges` is not numeric.** Eleven rows hold a single space character
-   instead of a number. All eleven belong to customers with `tenure = 0` — they
-   had been billed nothing because they had not completed a cycle. Read
-   naively, pandas types the whole column as text and every downstream scaler
-   fails silently or loudly. Handled with `pd.to_numeric(errors="coerce")`
-   followed by median imputation inside the pipeline.
-2. **`customerID`** is a unique key with zero predictive value and is dropped
-   before modelling. Left in, tree-based models would happily memorise
-   individual rows.
-3. **Whitespace** is stripped from every string column before encoding, so
-   `"Yes"` and `"Yes "` cannot become two distinct one-hot categories.
+1. **`TotalCharges` was not numeric.** 11 rows contain a single space instead of
+   a number. I checked these rows and all 11 are customers with `tenure = 0`,
+   meaning they had just joined and had not been billed yet. If you load the CSV
+   normally, pandas reads the whole column as text and scaling breaks. I fixed
+   this with `pd.to_numeric(errors="coerce")` so the blanks become NaN, and then
+   median imputation inside the pipeline fills them.
+2. **`customerID` is useless for prediction.** It is a unique key, so I dropped
+   it. If I left it in, the tree models could just memorise individual rows.
+3. **Extra whitespace in text columns.** I strip it before encoding, otherwise
+   `"Yes"` and `"Yes "` would be treated as two different categories.
 
-### Preprocessing pipeline
+### Preprocessing
 
-All five models share **one identical `ColumnTransformer`**, so any difference
-in the results table is attributable to the algorithm and not to inconsistent
-feature engineering:
+All five models use the **same `ColumnTransformer`**, so any difference in the
+results comes from the algorithm and not from different feature engineering:
 
-- Numeric → median imputation → `StandardScaler`
-- Categorical → most-frequent imputation → `OneHotEncoder(handle_unknown="ignore")`
+- Numeric columns: median imputation, then `StandardScaler`
+- Categorical columns: most-frequent imputation, then
+  `OneHotEncoder(handle_unknown="ignore")`
 
-Scaling is mandatory rather than decorative here: kNN measures Euclidean
-distance, so an unscaled `TotalCharges` (range ≈ 0–8,700) would completely
-drown out `tenure` (0–72) and all 40-odd binary indicators.
+Scaling was necessary here, not optional. kNN uses Euclidean distance, and
+`TotalCharges` goes up to about 8,700 while `tenure` only goes up to 72. Without
+scaling, `TotalCharges` would dominate the distance calculation and the other
+40+ binary columns would barely matter.
 
-Because preprocessing is bundled *inside* each saved `Pipeline`, the Streamlit
-app accepts a **raw** CSV upload with no client-side encoding whatsoever.
+I put the preprocessing **inside** each saved `Pipeline`. This turned out to be
+very useful for the app, because it means the Streamlit app can accept a raw CSV
+and does not have to redo any encoding itself.
 
 ---
 
@@ -86,10 +88,7 @@ app accepts a **raw** CSV upload with no client-side encoding whatsoever.
 
 ### Live Streamlit App
 
-> **https://<your-app-name>.streamlit.app**
->
-> _Replace with the deployed URL once the app is live on Streamlit Community
-> Cloud (New App → this repo → branch `main` → `app.py`)._
+> **https://customerchurntelco.streamlit.app**
 
 ### Repository structure
 
@@ -103,68 +102,69 @@ streamlit_app/
 ├── .devcontainer/
 │   └── devcontainer.json
 ├── .streamlit/
-│   └── config.toml         # Dark theme + chart colour tokens
+│   └── config.toml         # Theme and chart colours
 ├── data/
 │   └── WA_Fn-UseC_-Telco-Customer-Churn.csv
 └── model/
-    ├── preprocessing.py    # Shared feature pipeline
+    ├── preprocessing.py    # Shared preprocessing pipeline
     ├── train_models.py     # Trains and evaluates all five models
     ├── logistic_regression.joblib
     ├── decision_tree.joblib
     ├── knn.joblib
     ├── naive_bayes.joblib
     ├── random_forest.joblib
-    ├── metrics.json        # Machine-readable results
+    ├── metrics.json        # Results in JSON
     └── metrics.md          # Results as a Markdown table
 ```
 
-### Reproducing the results
+### How to run it
 
 ```bash
 git clone https://github.com/2025ac05185-dotcom/streamlit_app.git
 cd streamlit_app
 pip install -r requirements.txt
 
-python model/train_models.py   # retrains, rewrites test_data.csv + metrics
-streamlit run app.py           # dashboard at localhost:8501
+python model/train_models.py   # retrains and rewrites test_data.csv + metrics
+streamlit run app.py           # opens the dashboard on localhost:8501
 ```
 
 ---
 
 ## d. Models Used
 
-Five classifiers, each wrapped in the shared preprocessing pipeline and fitted
-on the same 5,282-row training split.
+Five classifiers, all using the same preprocessing pipeline and trained on the
+same 5,282 rows.
 
-| # | Model | Configuration |
+| # | Model | Settings |
 | --- | --- | --- |
 | 1 | Logistic Regression | `max_iter=2000`, `class_weight="balanced"` |
 | 2 | Decision Tree | `max_depth=6`, `min_samples_leaf=25`, `class_weight="balanced"` |
 | 3 | k-Nearest Neighbours | `n_neighbors=25`, `weights="distance"` |
-| 4 | Naive Bayes | `GaussianNB` on the dense encoded matrix |
+| 4 | Naive Bayes | `GaussianNB` |
 | 5 | Random Forest (Ensemble) | `n_estimators=400`, `min_samples_leaf=5`, `class_weight="balanced_subsample"` |
 
-Every algorithm that exposes a class weight is given one. Without it the models
-drift toward predicting "No" for everybody, which scores a comfortable-looking
-73% accuracy while catching nobody worth retaining.
+I used `class_weight="balanced"` wherever the algorithm supports it. When I first
+tried without it, the models mostly predicted "No" for everyone. That gives about
+73% accuracy, which looks fine until you notice it catches almost no churners at
+all, which makes the model useless for the actual business problem.
 
-### Evaluation metrics — held-out test set (1,761 rows, threshold 0.50)
+### Evaluation metrics on the test set (1,761 rows, threshold 0.50)
 
 | ML Model Name | Accuracy | AUC | Precision | Recall | F1 | MCC |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Logistic Regression | 0.7496 | **0.8460** | 0.5182 | 0.7944 | 0.6272 | 0.4743 |
 | Decision Tree | 0.7348 | 0.8320 | 0.5000 | 0.8201 | 0.6212 | 0.4667 |
-| kNN | **0.7802** | 0.8154 | **0.5897** | 0.5632 | 0.5761 | 0.4281 |
+| kNN | **0.7808** | 0.8154 | **0.5910** | 0.5632 | 0.5768 | 0.4292 |
 | Naive Bayes | 0.6979 | 0.8112 | 0.4616 | **0.8373** | 0.5951 | 0.4284 |
 | Random Forest (Ensemble) | 0.7740 | 0.8437 | 0.5561 | 0.7323 | **0.6322** | **0.4828** |
 
-**Reference point:** predicting "No churn" for every single customer scores
-**0.7348 accuracy** on this test set — and catches nobody, for an MCC of 0.000.
-Naive Bayes scores *worse* than that baseline on accuracy (0.6979) and the
-Decision Tree ties it exactly (0.7348), yet both carry an MCC above 0.46. Two of
-the five models are therefore indistinguishable from — or beaten by — a model
-that does nothing, if you only read the accuracy column. That is exactly why the
-table has six columns.
+One thing I checked as a sanity test: if you just predict "No churn" for every
+customer, you get **0.7348 accuracy** on this test set, and an MCC of 0. Compare
+that to the table. The Decision Tree gets exactly the same accuracy (0.7348) and
+Naive Bayes actually does worse (0.6979), but both have an MCC above 0.46. So if
+I only looked at accuracy, I would have concluded that two of my five models were
+no better than doing nothing, which is clearly wrong. This is the main reason the
+assignment asks for six metrics instead of one.
 
 ---
 
@@ -172,84 +172,86 @@ table has six columns.
 
 | ML Model Name | Observation about model performance |
 | :--- | :--- |
-| **Logistic Regression** | Best ranking model in the set (AUC 0.8460) despite being the simplest. Churn in this dataset is close to linearly separable in log-odds space: the fitted coefficients say tenure (−1.14) and a two-year contract (−0.74) protect against churn, while fibre-optic internet (+0.68) and month-to-month contracts (+0.64) drive it. Class weighting pushes the decision boundary well below the natural rate, so it flags 716 of 1,761 customers — recall 0.79 bought at precision 0.52. Its accuracy (0.7496) sits barely above the do-nothing baseline, which is a feature of that trade-off, not a failure. |
-| **Decision Tree** | Splits first on `Contract_Month-to-month`, confirming the single strongest signal in the data. Highest recall of any non-Bayes model (0.8201) and completely interpretable — 55 leaves at depth 6, a rule set a retention team could read. But it lands at exactly 0.7348 accuracy, identical to the majority-class baseline, while its MCC of 0.4667 is far from the baseline's 0.0. A crisp demonstration that accuracy alone would rate this model as worthless. Depth had to be capped: unpruned, it memorises the training split and generalises noticeably worse. |
-| **kNN** | Highest accuracy (0.7802) and highest precision (0.5897), and the weakest model where it counts. It flags only 446 customers and misses 44% of actual churners (recall 0.5632) — the most conservative model in the set. Its lowest-in-class AUC (0.8154) shows the ranking itself is weaker, not just the threshold. With 45 encoded dimensions the distance metric is diluted by dozens of sparse one-hot columns, the classic curse-of-dimensionality failure. Also the slowest at inference: 200 KB of stored training data that must be scanned per query. |
-| **Naive Bayes** | Best recall in the study (0.8373) and worst accuracy (0.6979) — it flags 847 of 1,761 customers, nearly half the book. The feature-independence assumption is badly violated here: `InternetService`, `OnlineSecurity`, `TechSupport` and `StreamingTV` are structurally correlated (no internet ⇒ no add-ons), so correlated evidence gets counted repeatedly and probabilities are pushed to extremes. Poorly calibrated, but the ranking survives (AUC 0.8112) and it trains in milliseconds. Usable as a cheap high-recall pre-filter, not as a final decision-maker. |
-| **Random Forest (Ensemble)** | Best F1 (0.6322) and best MCC (0.4828) — the most balanced model on the two metrics that account for both error types. Bagging 400 trees repairs the single tree's variance problem while keeping most of its recall: 0.7323 recall at 0.5561 precision, catching 342 of 467 churners. AUC 0.8437 trails Logistic Regression by just 0.0024, so on pure ranking the two are effectively tied. Importances corroborate the linear model — `tenure` (0.127), `Contract_Month-to-month` (0.121) and `TotalCharges` (0.107) dominate. Costs 7.3 MB on disk against Logistic Regression's 3 KB. |
-| **Overall winner for this dataset** | **Random Forest**, on MCC (0.4828) and F1 (0.6322) — the metrics that stay honest under a 73/27 class imbalance. The caveat is worth stating plainly: Logistic Regression *out-ranks* it on AUC (0.8460 vs 0.8437) at roughly 1/2000th the model size and with directly readable coefficients. Random Forest wins the assignment's scoring criteria; for a production retention system where a stakeholder has to be told *why* a customer was flagged, Logistic Regression would be the defensible choice. |
+| **Logistic Regression** | This was the best model at ranking customers (AUC 0.8460), which surprised me because it is the simplest one I tried. It seems churn in this dataset is close to linearly separable in log-odds space. Looking at the coefficients, tenure (−1.14) and a two-year contract (−0.74) reduce churn risk, while fibre-optic internet (+0.68) and month-to-month contracts (+0.64) increase it. Because of the class weighting it flags 716 of the 1,761 customers, giving recall 0.79 but precision only 0.52. Its accuracy (0.7496) is barely above the baseline, but that is the expected result of that trade-off rather than a problem with the model. |
+| **Decision Tree** | The first split is on `Contract_Month-to-month`, which matches what the other models say is the strongest signal. Recall is 0.8201, the highest apart from Naive Bayes, and the tree is easy to explain since it has 55 leaves at depth 6. The interesting part is that its accuracy is exactly 0.7348, identical to the majority-class baseline, while its MCC is 0.4667 instead of 0. I had to limit the depth because when I left it unpruned it memorised the training data and did noticeably worse on the test set. |
+| **kNN** | This model has the highest accuracy (0.7808) and the highest precision (0.5910), but it is the weakest model where it matters. It only flags 445 customers and misses about 44% of the actual churners (recall 0.5632), so it is the most conservative of the five. Its AUC is also the lowest (0.8154), which tells me the ranking itself is weaker and it is not just a threshold problem. I think this is the curse of dimensionality: with 45 encoded columns, most of them sparse one-hot columns, the distance measure gets diluted. It is also the slowest at prediction time because it stores 200 KB of training data that has to be searched for every query. |
+| **Naive Bayes** | Best recall of all five models (0.8373) but the worst accuracy (0.6979). It flags 847 of 1,761 customers, which is almost half the customer base and probably too many for a real retention team to call. The independence assumption is badly violated in this dataset, because `InternetService`, `OnlineSecurity`, `TechSupport` and `StreamingTV` are obviously related (if you have no internet you cannot have the add-ons), so the same evidence gets counted several times and the probabilities get pushed towards 0 and 1. The probabilities are therefore not well calibrated, but the ranking is still reasonable (AUC 0.8112) and it trains almost instantly. It could work as a cheap first filter, but not as the final decision maker. |
+| **Random Forest (Ensemble)** | Best F1 (0.6322) and best MCC (0.4828), so it is the most balanced model on the two metrics that consider both types of error. Bagging 400 trees fixes the variance problem of the single tree while keeping most of its recall: 0.7323 recall at 0.5561 precision, catching 342 of the 467 churners in the test set. Its AUC (0.8437) is only 0.0024 behind Logistic Regression, so for ranking the two are basically equal. The feature importances agree with the logistic regression coefficients, with `tenure` (0.127), `Contract_Month-to-month` (0.121) and `TotalCharges` (0.107) at the top. The downside is size: about 7.3 MB on disk compared to 2.6 KB for Logistic Regression. |
+| **Overall winner for this dataset** | **Random Forest**, based on MCC (0.4828) and F1 (0.6322), which are the metrics that stay meaningful with a 73/27 class imbalance. I should add one caveat though. Logistic Regression actually beats it on AUC (0.8460 vs 0.8437) while being a tiny fraction of the size and having coefficients you can read directly. So Random Forest wins on the assignment's metrics, but if this were a real retention system where someone has to explain to a customer or a manager why a particular account was flagged, I would choose Logistic Regression. |
 
-### A note on threshold choice
+### A note on the threshold
 
-Every metric except AUC above is computed at the default 0.50 cut-off. AUC is
-threshold-independent, which is why it is the fairest single-number comparison
-of the five algorithms — and why the deployed app exposes a **threshold slider**:
-dragging it re-scores precision, recall, F1 and MCC live while the ROC curve
-stays put, making the retention-cost trade-off visible rather than assumed.
+Every metric above except AUC is calculated at the default 0.50 cut-off. AUC does
+not depend on the threshold, which is why it is the fairest single number for
+comparing the five algorithms. It is also why I added a **threshold slider** to
+the app: moving it recalculates precision, recall, F1 and MCC live while the ROC
+curve stays the same, so the trade-off is something you can see instead of
+something you have to take my word for.
 
-**0.50 is not the optimum.** Sweeping Random Forest across the full
-0.05–0.95 grid, both F1 and MCC peak at **0.47**, not 0.50:
+I also found that **0.50 is not the best threshold**. Sweeping the Random Forest
+across the whole 0.05 to 0.95 range, F1 and MCC both peak at **0.47**:
 
 | Threshold | F1 | MCC |
 | :--- | ---: | ---: |
 | 0.50 (default) | 0.6322 | 0.4828 |
-| **0.47 (optimum)** | **0.6443** | **0.4997** |
+| **0.47 (best)** | **0.6443** | **0.4997** |
 
-A 0.03 shift in the cut-off buys +0.0121 F1 and +0.0169 MCC for free — no
-retraining, no new features. The app's **Threshold analysis** tab computes this
-sweep live for whichever model is selected and offers one-click buttons to snap
-the slider to either optimum, so the point is demonstrable rather than asserted.
+That is +0.0121 F1 and +0.0169 MCC just from changing the cut-off, with no
+retraining and no new features. The **Threshold analysis** tab in the app runs
+this sweep live for whichever model is selected and has buttons to jump straight
+to the best-F1 or best-MCC threshold.
 
 ---
 
 ## Streamlit Application
 
-Deployed on Streamlit Community Cloud. Features:
+The app is deployed at **https://customerchurntelco.streamlit.app**.
 
-| Requirement | Implementation |
+| Requirement | How I implemented it |
 | --- | --- |
-| Dataset upload (CSV) | Sidebar uploader; falls back to the bundled `test_data.csv` so the app is never empty on first load |
-| Model selection dropdown | All five trained pipelines, switchable live |
-| Display of evaluation metrics | All six metrics as headline stat tiles, recomputed on the uploaded data |
-| Confusion matrix / classification report | Interactive heatmap **and** per-class precision/recall/F1 report, side by side |
+| Dataset upload (CSV) | File uploader in the sidebar. If nothing is uploaded it falls back to the bundled `test_data.csv`, so the app is never blank when you first open it |
+| Model selection dropdown | All five trained pipelines, switchable without reloading |
+| Display of evaluation metrics | All six metrics shown as tiles at the top, recalculated on whatever data is loaded |
+| Confusion matrix / classification report | Interactive heatmap and the per-class precision/recall/F1 report, side by side |
 
-The interface is organised as four tabs — **Performance**, **Threshold
-analysis**, **Model comparison** and **Predictions** — under a fixed row of
-six metric tiles that always shows where the selected model ranks against the
-other four ("Best of 5", "2nd of 5 · −0.0062 vs best").
+The layout is four tabs (**Performance**, **Threshold analysis**, **Model
+comparison** and **Predictions**) underneath a fixed row of six metric tiles.
+The tiles also show where the selected model ranks against the other four, for
+example "Best of 5" or "2nd of 5 · −0.0062 vs best".
 
-Beyond the requirements:
+Things I added beyond the requirements:
 
-- **Threshold analysis tab** — a live precision/recall/F1 sweep across the whole
-  0.05–0.95 grid, the current cut-off marked on both the sweep and the ROC
-  curve, and one-click buttons to jump to the best-F1 or best-MCC threshold
-- **Threshold economics** — churners caught, false-alarm rate and flag rate,
-  translating the cut-off into retention-team workload
-- **Confusion matrix shaded by row share**, so the 1,021 true negatives cannot
-  wash out the three cells that carry the actual decision
-- **All-models ROC overlay** and a comparison bar chart re-rankable by any of
-  the six metrics
-- **Per-row predictions** led by churn probability, prediction and correctness,
-  with a misclassified-rows-only filter and CSV download
+- **Threshold analysis tab** with a live precision/recall/F1 sweep across the
+  whole 0.05–0.95 range, the current cut-off marked on both the sweep and the
+  ROC curve, and buttons to jump to the best-F1 or best-MCC threshold
+- **Threshold economics**, showing churners caught, false alarm rate and flag
+  rate, so the threshold can be read as actual workload for a retention team
+- **Confusion matrix shaded by row percentage** rather than raw count, because
+  the 1,021 true negatives were washing out the three cells that actually matter
+- **ROC overlay of all five models** and a comparison bar chart that can be
+  re-sorted by any of the six metrics
+- **Row-level predictions** with churn probability, prediction and whether it was
+  correct, a filter to show only the misclassified rows, and a CSV download
 
 ### Implementation notes
 
-Every model's predicted probabilities are computed **once per uploaded file** and
-cached on a content hash of the CSV. Scoring all five pipelines costs ~78 ms on
-the 1,761-row split; without caching that ran on every slider tick. Moving the
-threshold now only re-compares a cached probability vector, so interaction
-completes in ~155 ms end-to-end.
+The predicted probabilities for all five models are calculated **once per
+uploaded file** and cached using a hash of the CSV contents. Scoring all five
+pipelines takes about 78 ms on the 1,761-row split, and before I added the cache
+that was happening on every single slider movement. Now moving the threshold only
+re-compares an already-computed array, so it responds in about 155 ms.
 
-Charts are built with Altair rather than static Matplotlib images, so every mark
-carries a tooltip. The colour palette is validated for colour-vision deficiency:
-worst adjacent-pair separation ΔE 8.4 under protanopia, every series ≥ 3:1
-contrast against the card surface. The three-colour subset used for the crossing
-sweep lines clears the stricter all-pairs gate (worst ΔE 9.4 deutan), because
-lines that cross cannot rely on adjacency.
+I used Altair for the charts instead of static Matplotlib images so that every
+point has a tooltip. I also checked the colour palette for colour-vision
+deficiency: the worst adjacent pair is ΔE 8.4 under protanopia and every colour
+has at least 3:1 contrast against the card background. For the three lines in the
+threshold sweep I used a stricter check (worst ΔE 9.4 under deuteranopia) because
+those lines cross each other, so being next to each other in the legend is not
+enough.
 
 ---
 
 ## Execution Environment
 
-Models were trained and the app was run on **BITS Virtual Lab** — screenshot
-included in the submitted PDF.
+The models were trained and the app was tested on **BITS Virtual Lab**. A
+screenshot is included in the submitted PDF.
