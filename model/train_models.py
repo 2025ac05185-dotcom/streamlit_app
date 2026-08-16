@@ -60,6 +60,11 @@ MODELS = {
         DecisionTreeClassifier(
             max_depth=6,
             min_samples_leaf=25,
+            # Pruning is left off deliberately: max_depth and min_samples_leaf
+            # already bound the tree, and cost-complexity pruning on top would
+            # cut below the 55 leaves the write-up quotes. Stated explicitly
+            # rather than inherited so the regularisation story is all here.
+            ccp_alpha=0.0,
             class_weight="balanced",
             random_state=SEED,
         ),
@@ -77,6 +82,10 @@ MODELS = {
         RandomForestClassifier(
             n_estimators=400,
             min_samples_leaf=5,
+            # sqrt(45) ~= 7 features per split. Decorrelating the trees is the
+            # whole point of the ensemble; handing every split all 45 encoded
+            # columns would rebuild 400 near-copies of the single tree above.
+            max_features="sqrt",
             class_weight="balanced_subsample",
             random_state=SEED,
             n_jobs=-1,
@@ -120,8 +129,13 @@ def main() -> None:
 
     results = {}
     for key, (label, estimator) in MODELS.items():
+        # memory=None: transformer caching is off on purpose. Each model gets a
+        # freshly built preprocessor and the fit runs once, so a cache would add
+        # a temp directory and stale-state risk to the .joblib artefacts without
+        # saving any work.
         pipe = Pipeline(
-            [("prep", build_preprocessor(X_train)), ("clf", estimator)]
+            [("prep", build_preprocessor(X_train)), ("clf", estimator)],
+            memory=None,
         ).fit(X_train, y_train)
 
         # Threshold explicitly at 0.50 rather than calling .predict(). For
